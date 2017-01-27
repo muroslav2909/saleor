@@ -1,4 +1,5 @@
 import datetime
+from decimal import Decimal
 
 from mock import Mock
 
@@ -7,7 +8,7 @@ from django.core.urlresolvers import reverse
 from saleor.cart.models import Cart
 from saleor.cart import CartStatus, utils
 from saleor.product import models
-from saleor.product.utils import get_availability
+from saleor.product.utils import get_availability, get_variant_price_with_vat
 from tests.utils import filter_products_by_attribute
 
 
@@ -262,3 +263,17 @@ def test_adding_to_cart_with_closed_cart_token(
         user=admin_user, status=CartStatus.OPEN).count() == 1
     assert Cart.objects.filter(
         user=admin_user, status=CartStatus.ORDERED).count() == 1
+
+
+def test_get_variant_price_with_vat_no_key(product_in_stock):
+    variant = product_in_stock.variants.first()
+    assert variant.get_price_per_item() == get_variant_price_with_vat(
+        variant, 'AU')
+
+
+def test_get_variant_price_with_vat(product_in_stock, vat):
+    cents = Decimal('0.01')
+    variant = product_in_stock.variants.first()
+    price_with_vat = get_variant_price_with_vat(variant, 'AT').quantize(cents)
+    variant_price_with_vat = (variant.get_price_per_item().gross * 110) / 100
+    assert price_with_vat.gross == variant_price_with_vat.quantize(cents)
