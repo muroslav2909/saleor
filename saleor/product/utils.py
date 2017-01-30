@@ -111,7 +111,8 @@ def handle_cart_form(request, product, create_cart=False):
 
     form_class = get_form_class_for_product(product)
     form = form_class(cart=cart, product=product,
-                      data=request.POST or None, discounts=request.discounts)
+                      data=request.POST or None, discounts=request.discounts,
+                      country=request.country)
     return form, cart
 
 
