@@ -113,7 +113,8 @@ class CategoryType(DjangoObjectType):
     def resolve_products(self, args, context, info):
         def filter_by_price(queryset, value, operator):
             return [obj for obj in queryset if operator(get_availability(
-                obj, context.discounts).price_range.min_price.gross, value)]
+                obj, context.discounts,
+                country=context.country).price_range.min_price.gross, value)]
 
         tree = self.get_descendants(include_self=True)
         qs = Product.objects.prefetch_for_api().filter(categories__in=tree)
