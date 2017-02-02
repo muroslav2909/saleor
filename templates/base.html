@@ -55,6 +55,10 @@
                               <a href="{% url "account_login" %}">{% trans "Log in" %}</a>
                             </li>
                           {% endif %}
+                          <form novalidate method="post" action="{% url 'set-country' %}" id="country-form">
+                            {% csrf_token %}
+                            {{ country_form.country }}
+                          </form>
                         </ul>
                       </div>
                     </div>
