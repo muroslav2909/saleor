@@ -1,96 +1,97 @@
 {% extends "dashboard/base.html" %}
 {% load i18n %}
-{% load prices_i18n %}
 {% load materializecss %}
+{% load static %}
+{% load utils %}
 
-{% block title %}{% trans "Customers" context "Customer list page title" %} - {{ block.super }}{% endblock %}
+{% block title %}
+  {% trans "Customers" context "Dashboard customers list" %} - {{ block.super }}
+{% endblock %}
 
 {% block body_class %}body-customers{% endblock %}
 
 {% block menu_customers_class %}active{% endblock %}
 
+{% block header_extra %}
+  <div class="btn-fab-fixed">
+    <a href="{% url 'dashboard:customer-create' %}" class="btn-fab-default waves-effect waves-light" title="{% trans "Add customer" context "Customer list add button text" %}" >
+      <svg data-src="{% static "dashboard/images/add.svg" %}" />
+    </a>
+  </div>
+{% endblock %}
+
 {% block breadcrumbs %}
-    <ul class="breadcrumbs">
-        <li class="visible-s">{% trans "Customers" context "Customer list breadcrumbs" %}</li>
-    </ul>
+  <ul class="breadcrumbs">
+    <li class="visible-s">
+      {% trans "Customers" context "Dashboard customers list" %}
+    </li>
+  </ul>
 {% endblock %}
 
 {% block content %}
-    <form method="get" novalidate>
-        <div class="row">
-            {{ form.email|materializecss:"s12 m3 l3" }}
-            {{ form.name|materializecss:"s12 m3 l3" }}
-            {{ form.order_status|materializecss:"s7 m3 l2" }}
+  <div class="row">
+    <div class="col s12 l9">
+      {% if customers %}
+        <div class="card">
+          <div class="data-table-container">
+            <table class="bordered highlight responsive data-table">
+              <thead>
+                <tr>
+                  {% trans "Name" context "Customers table header" as label %}
+                  {% sorting_header 'name' label %}
 
-            <div class="col s5 m3 l3">
-                <button type="submit" class="btn btn--inline">
-                    {% trans "Filter" context "Customer list form primary action" %}</button>
-                {% if form.is_bound %}
-                    <a class="btn btn--inline" href="{% url 'dashboard:customers' %}">
-                        {% trans "Clear" context "Customer list form secondary action" %}</a>
-                {% endif %}
-            </div>
+                  {% trans "Email" context "Customers table header" as label %}
+                  {% sorting_header 'email' label %}
+
+                  {% trans "Location" context "Customers table header" as label %}
+                  {% sorting_header 'location' label %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for customer in customers %}
+                  <tr data-action-go="{% url "dashboard:customer-details" pk=customer.pk %}">
+                    {% with customer.default_billing_address as default_address %}
+                      <td>
+                        {% if customer.get_full_name != customer.email %}
+                          {{ customer.get_full_name }}
+                        {% else %}
+                          -
+                        {% endif %}
+                      </td>
+                      <td>
+                        {{ customer.email }}
+                      </td>
+                      <td>
+                        {% if default_address %}
+                          {{ default_address.city }}, {{ default_address.get_country_display }}
+                        {% else %}
+                          -
+                        {% endif %}
+                      </td>
+                    {% endwith %}
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
         </div>
-    </form>
-
-
-    <div class="card">
-        <div class="data-table-header{% if not customers %} data-table-header--no-data{% endif %}">
-            <h5 class="card-title black-text">{{ title }}</h5>
-        </div>
-
-        {% if customers %}
-            <div class="data-table-container">
-                <table class="bordered hoverable responsive data-table">
-                    <thead>
-                        <tr>
-                            <th>{% trans "Email" context "Customers table header" %}</th>
-                            <th class="wide">{% trans "Name" context "Customers table header" %}</th>
-                            <th>{% trans "Location" context "Customers table header" %}</th>
-                            <th class="right-align">{% trans "Number of orders" context "Customers table header" %}</th>
-                            <th>{% trans "Last order" context "Customers table header" %}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                    {% for customer in customers %}
-                        <tr>
-                            {% with customer.default_billing_address as default_address %}
-                            <td>
-                                <a href="{% url "dashboard:customer-details" pk=customer.pk %}">{{ customer.email }}</a>
-                            </td>
-                            {% if default_address %}
-                                <td>
-                                    {{ default_address.first_name }} {{ default_address.last_name }}
-                                </td>
-                                <td>
-                                    {{ default_address.city }}, {{ default_address.get_country_display }}
-                                </td>
-                            {% else %}
-                                <td colspan="2"></td>
-                            {% endif %}
-                            {% endwith %}
-                            <td class="right-align">
-                                {{ customer.num_orders }}
-                            </td>
-                            <td>
-                                {% if customer.last_order %}
-                                    <a href="{% url 'dashboard:order-details' order_pk=customer.last_order %}">
-                                        {% blocktrans with last_order=customer.last_order trimmed context "Customers table last order data" %}
-                                            #{{ last_order }}
-                                        {% endblocktrans %}
-                                    </a>
-                                {% endif %}
-                            </td>
-                        </tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+        {% paginate customers %}
+      {% else %}
+        {% if is_empty %}
+          {% include 'dashboard/customer/zero_page.html' %}
         {% else %}
-            <div class="card-content card-content--no-data">
-                <p>{% trans "No customers found." context "Empty customers table message" %}</p>
+          <div class="col s12">
+            <div class="not-found">
+              <p class="grey-text">
+                {% trans "No customers found." context "Empty customers table message" %}
+              </p>
             </div>
+          </div>
         {% endif %}
+      {% endif %}
     </div>
-    {% include "dashboard/includes/_pagination.html" with page_obj=customers %}
+    <div class="col s12 l3" id="filters">
+      {% if not is_empty %}{% filters filter_set %}{% endif %}
+    </div>
+  </div>
 {% endblock %}

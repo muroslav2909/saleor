@@ -1,4 +1,5 @@
-import React, { Component, PropTypes } from 'react';
+import React, { Component } from 'react';
+import PropTypes from 'prop-types';
 import classNames from 'classnames';
 
 export default class AttributeSelectionWidget extends Component {
@@ -16,13 +17,13 @@ export default class AttributeSelectionWidget extends Component {
   render() {
     const { attribute, selected } = this.props;
     return (
-      <div className="product__variant-picker">
-        <div className="product__variant-picker__label">{attribute.display}</div>
+      <div className="variant-picker">
+        <div className="variant-picker__label">{attribute.name}</div>
         <div className="btn-group" data-toggle="buttons">
           {attribute.values.map((value, i) => {
             const active = selected === value.pk.toString();
             const labelClass = classNames({
-              'btn btn-secondary': true,
+              'btn btn-secondary variant-picker__option': true,
               'active': active
             });
             return (
@@ -34,7 +35,7 @@ export default class AttributeSelectionWidget extends Component {
                   defaultChecked={active}
                   name={value.pk}
                   type="radio"/>
-                {value.display}
+                {value.name}
               </label>
             );
           })}

@@ -1,19 +1,21 @@
-from __future__ import unicode_literals
+from io import StringIO
 
+from django.apps import apps
+from django.conf import settings
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
 from django.db import connection
 
-from ...utils.random_data import (
-    create_orders, create_users, create_shipping_methods,
-    create_products_by_schema, create_product_sales, create_vouchers,
-    set_featured_products, add_address_to_admin)
 from ...utils import create_superuser
+from ...utils.random_data import (
+    add_address_to_admin, create_menus, create_orders, create_page,
+    create_product_sales, create_products_by_schema, create_shipping_zones,
+    create_users, create_vouchers, set_homepage_collection)
 
 
 class Command(BaseCommand):
     help = 'Populate database with test objects'
-    placeholders_dir = r'saleor/static/placeholders/'
+    placeholders_dir = 'saleor/static/placeholders/'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -34,28 +36,51 @@ class Command(BaseCommand):
             dest='withoutsearch',
             default=False,
             help='Don\'t update search index')
+        parser.add_argument(
+            '--skipsequencereset',
+            action='store_true',
+            dest='skipsequencereset',
+            default=False,
+            help='Don\'t reset SQL sequences that are out of sync.')
 
     def make_database_faster(self):
-        '''Sacrifices some of the safeguards of sqlite3 for speed
+        """Sacrifice some of the safeguards of sqlite3 for speed.
 
         Users are not likely to run this command in a production environment.
         They are even less likely to run it in production while using sqlite3.
-        '''
+        """
         if 'sqlite3' in connection.settings_dict['ENGINE']:
             cursor = connection.cursor()
             cursor.execute('PRAGMA temp_store = MEMORY;')
             cursor.execute('PRAGMA synchronous = OFF;')
 
     def populate_search_index(self):
-        call_command('update_index')
+        if settings.ES_URL:
+            call_command('search_index', '--rebuild', force=True)
+
+    def sequence_reset(self):
+        """Runs SQL sequence reset on all saleor.* apps.
+
+        When a value is manually assigned to an auto-incrementing field
+        it doesn't update the field's sequence, which might cause a conflict
+        later on.
+        """
+        commands = StringIO()
+        for app in apps.get_app_configs():
+            if 'saleor' in app.name:
+                call_command(
+                    'sqlsequencereset', app.label,
+                    stdout=commands, no_color=True)
+        with connection.cursor() as cursor:
+            cursor.execute(commands.getvalue())
 
     def handle(self, *args, **options):
         self.make_database_faster()
         create_images = not options['withoutimages']
-        for msg in create_shipping_methods():
+        for msg in create_shipping_zones():
             self.stdout.write(msg)
-        create_products_by_schema(self.placeholders_dir, 10, create_images,
-                                  stdout=self.stdout)
+        create_products_by_schema(self.placeholders_dir, create_images)
+        self.stdout.write('Created products')
         for msg in create_product_sales(5):
             self.stdout.write(msg)
         for msg in create_vouchers():
@@ -64,7 +89,11 @@ class Command(BaseCommand):
             self.stdout.write(msg)
         for msg in create_orders(20):
             self.stdout.write(msg)
-        for msg in set_featured_products(16):
+        for msg in set_homepage_collection():
+            self.stdout.write(msg)
+        for msg in create_page():
+            self.stdout.write(msg)
+        for msg in create_menus():
             self.stdout.write(msg)
 
         if options['createsuperuser']:
@@ -74,3 +103,5 @@ class Command(BaseCommand):
             add_address_to_admin(credentials['email'])
         if not options['withoutsearch']:
             self.populate_search_index()
+        if not options['skipsequencereset']:
+            self.sequence_reset()

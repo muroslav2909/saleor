@@ -1,35 +1,59 @@
 version: '2'
+
 services:
-  db:
-    image: postgres
-    environment:
-      - POSTGRES_USER=saleor
-      - POSTGRES_PASSWORD=saleor
-    ports:
-      - '5432:5432'
-  redis:
-    image: redis
-    ports:
-      - '6379:6379'
-  search:
-    image: elasticsearch:2.4
-    ports:
-      - '9200:9200'
   web:
-    build: .
-    command: python manage.py runserver 0.0.0.0:8000
-    environment:
-      - DATABASE_URL=postgres://saleor:saleor@db/saleor
-      - DEFAULT_FROM_EMAIL=noreply@example.com
-      - ELASTICSEARCH_URL=http://search:9200/
-      - OPENEXCHANGERATES_API_KEY
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=changeme
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+      args:
+        STATIC_URL: '/static/'
+    restart: unless-stopped
+    networks:
+      - saleor-backend-tier
+    env_file: common.env
     depends_on:
       - db
       - redis
-      - search
-    ports:
-      - '8000:8000'
+
+  db:
+    image: library/postgres:11.1-alpine
+    restart: unless-stopped
+    networks:
+      - saleor-backend-tier
     volumes:
-      - .:/app:Z
+      - saleor-db:/var/lib/postgresql
+    environment:
+      - POSTGRES_USER=saleor
+      - POSTGRES_PASSWORD=saleor
+
+  redis:
+    image: library/redis:5.0-alpine
+    restart: unless-stopped
+    networks:
+      - saleor-backend-tier
+    volumes:
+      - saleor-redis:/data
+
+  celery:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+      args:
+        STATIC_URL: '/static/'
+    command: celery -A saleor worker --app=saleor.celeryconf:app --loglevel=info
+    restart: unless-stopped
+    networks:
+      - saleor-backend-tier
+    env_file: common.env
+    depends_on:
+      - redis
+
+volumes:
+  saleor-db:
+    driver: local
+  saleor-redis:
+    driver: local
+
+networks:
+  saleor-backend-tier:
+    driver: bridge

@@ -1,126 +1,156 @@
-from __future__ import absolute_import, unicode_literals
-from itertools import groupby
-from operator import itemgetter
-
 from django.conf import settings
 from django.db import models
-from django.db.models import Q
-from django.utils.encoding import python_2_unicode_compatible
+from django.utils.safestring import mark_safe
 from django.utils.translation import pgettext_lazy
-from django_prices.models import PriceField
-from prices import PriceRange
-from django_countries import countries
+from django_countries.fields import CountryField
+from django_measurement.models import MeasurementField
+from django_prices.models import MoneyField
+from measurement.measures import Weight
+from prices import MoneyRange
+
+from ..core.utils import format_money
+from ..core.utils.taxes import get_taxed_shipping_price
+from ..core.utils.translations import TranslationProxy
+from ..core.weight import WeightUnits, zero_weight
+from . import ShippingMethodType
+from .utils import (
+    applicable_price_based_methods, applicable_weight_based_methods,
+    get_price_type_display, get_weight_type_display)
 
 
-ANY_COUNTRY = ''
-ANY_COUNTRY_DISPLAY = pgettext_lazy('Country choice', 'Rest of World')
-COUNTRY_CODE_CHOICES = [(ANY_COUNTRY, ANY_COUNTRY_DISPLAY)] + list(countries)
-
-
-@python_2_unicode_compatible
-class ShippingMethod(models.Model):
-
-    name = models.CharField(
-        pgettext_lazy('Shipping method field', 'name'),
-        max_length=100)
-    description = models.TextField(
-        pgettext_lazy('Shipping method field', 'description'),
-        blank=True, default='')
-
-    class Meta:
-        verbose_name = pgettext_lazy('Shipping method model', 'shipping method')
-        verbose_name_plural = pgettext_lazy('Shipping method model', 'shipping methods')
+class ShippingZone(models.Model):
+    name = models.CharField(max_length=100)
+    countries = CountryField(multiple=True, default=[], blank=True)
+    default = models.BooleanField(default=False)
 
     def __str__(self):
         return self.name
 
-    @property
-    def countries(self):
-        return [str(country) for country in self.price_per_country.all()]
+    def countries_display(self):
+        countries = self.countries
+        if self.default:
+            from ..dashboard.shipping.forms import get_available_countries
+            countries = get_available_countries()
+        if countries and len(countries) <= 3:
+            return ', '.join((country.name for country in countries))
+        return pgettext_lazy(
+            'Number of countries shipping zone apply to',
+            '%(num_of_countries)d countries' % {
+                'num_of_countries': len(countries)})
 
     @property
     def price_range(self):
-        prices = [country.price for country in self.price_per_country.all()]
+        prices = [
+            shipping_method.get_total()
+            for shipping_method in self.shipping_methods.all()]
         if prices:
-            return PriceRange(min(prices), max(prices))
-
-
-class ShippingMethodCountryQueryset(models.QuerySet):
-
-    def unique_for_country_code(self, country_code):
-        shipping = self.filter(
-            Q(country_code=country_code) |
-            Q(country_code=ANY_COUNTRY))
-        shipping = shipping.order_by('shipping_method_id')
-        shipping = shipping.values_list('shipping_method_id', 'id', 'country_code')
-        grouped_shipping = groupby(shipping, itemgetter(0))
-        any_country = ANY_COUNTRY
-
-        ids = []
-
-        for shipping_method_id, method_values in grouped_shipping:
-            method_values = list(method_values)
-            # if there is any country choice and specific one remove any country choice
-            if len(method_values) == 2:
-                method = [val for val in method_values if val[2] != any_country][0]
-            else:
-                method = method_values[0]
-            ids.append(method[1])
-        return self.filter(id__in=ids)
-
-
-@python_2_unicode_compatible
-class ShippingMethodCountry(models.Model):
-
-    country_code = models.CharField(
-        pgettext_lazy('Shipping method country field', 'country code'),
-        choices=COUNTRY_CODE_CHOICES, max_length=2, blank=True, default=ANY_COUNTRY)
-    price = PriceField(
-        pgettext_lazy('Shipping method country field', 'price'),
-        currency=settings.DEFAULT_CURRENCY, max_digits=12, decimal_places=2)
-    shipping_method = models.ForeignKey(
-        ShippingMethod, related_name='price_per_country',
-        verbose_name=pgettext_lazy('Shipping method country field', 'shipping method'),)
-
-    objects = ShippingMethodCountryQueryset.as_manager()
+            return MoneyRange(min(prices).net, max(prices).net)
+        return None
 
     class Meta:
-        unique_together = ('country_code', 'shipping_method')
-        verbose_name = pgettext_lazy(
-            'Shipping method country model', 'shipping method country')
-        verbose_name_plural = pgettext_lazy(
-            'Shipping method country model', 'shipping method countries')
+        permissions = ((
+            'manage_shipping', pgettext_lazy(
+                'Permission description', 'Manage shipping.')),)
+
+
+class ShippingMethodQueryset(models.QuerySet):
+    def price_based(self):
+        return self.filter(type=ShippingMethodType.PRICE_BASED)
+
+    def weight_based(self):
+        return self.filter(type=ShippingMethodType.WEIGHT_BASED)
+
+    def applicable_shipping_methods(self, price, weight, country_code):
+        """Returns ShippingMethods that can be used on an order with
+        shipment to given country(code), that are applicable to given
+        price & weight total.
+        """
+        # If dedicated shipping zone for the country exists, we should use it
+        # in the first place
+        qs = self.filter(
+            shipping_zone__countries__contains=country_code,
+            shipping_zone__default=False)
+        if not qs.exists():
+            # Otherwise default shipping zone should be used
+            qs = self.filter(shipping_zone__default=True)
+
+        qs = qs.prefetch_related('shipping_zone').order_by('price')
+        price_based_methods = applicable_price_based_methods(price, qs)
+        weight_based_methods = applicable_weight_based_methods(weight, qs)
+        return price_based_methods | weight_based_methods
+
+
+class ShippingMethod(models.Model):
+    name = models.CharField(max_length=100)
+    type = models.CharField(max_length=30, choices=ShippingMethodType.CHOICES)
+    price = MoneyField(
+        currency=settings.DEFAULT_CURRENCY,
+        max_digits=settings.DEFAULT_MAX_DIGITS,
+        decimal_places=settings.DEFAULT_DECIMAL_PLACES, default=0)
+    shipping_zone = models.ForeignKey(
+        ShippingZone, related_name='shipping_methods',
+        on_delete=models.CASCADE)
+    minimum_order_price = MoneyField(
+        currency=settings.DEFAULT_CURRENCY,
+        max_digits=settings.DEFAULT_MAX_DIGITS,
+        decimal_places=settings.DEFAULT_DECIMAL_PLACES, default=0, blank=True,
+        null=True)
+    maximum_order_price = MoneyField(
+        currency=settings.DEFAULT_CURRENCY,
+        max_digits=settings.DEFAULT_MAX_DIGITS,
+        decimal_places=settings.DEFAULT_DECIMAL_PLACES, blank=True, null=True)
+    minimum_order_weight = MeasurementField(
+        measurement=Weight, unit_choices=WeightUnits.CHOICES,
+        default=zero_weight, blank=True, null=True)
+    maximum_order_weight = MeasurementField(
+        measurement=Weight, unit_choices=WeightUnits.CHOICES,
+        blank=True, null=True)
+
+    objects = ShippingMethodQueryset.as_manager()
+    translated = TranslationProxy()
+
+    class Meta:
+        ordering = ('pk', )
 
     def __str__(self):
-        # https://docs.djangoproject.com/en/dev/ref/models/instances/#django.db.models.Model.get_FOO_display  # noqa
-        return '%s %s' % (self.shipping_method, self.get_country_code_display())
+        return self.name
 
-    def get_total(self):
-        return self.price
+    def __repr__(self):
+        if self.type == ShippingMethodType.PRICE_BASED:
+            minimum = '%s%s' % (
+                self.minimum_order_price.amount,
+                self.minimum_order_price.currency)
+            max_price = self.maximum_order_price
+            maximum = (
+                '%s%s' % (max_price.amount, max_price.currency)
+                if max_price else 'no limit')
+            return 'ShippingMethod(type=%s min=%s, max=%s)' % (
+                self.type, minimum, maximum)
+        return 'ShippingMethod(type=%s weight_range=(%s)' % (
+            self.type, get_weight_type_display(
+                self.minimum_order_weight, self.maximum_order_weight))
+
+    def get_total(self, taxes=None):
+        return get_taxed_shipping_price(self.price, taxes)
+
+    def get_ajax_label(self):
+        price_html = format_money(self.price)
+        label = mark_safe('%s %s' % (self, price_html))
+        return label
+
+    def get_type_display(self):
+        if self.type == ShippingMethodType.PRICE_BASED:
+            return get_price_type_display(
+                self.minimum_order_price, self.maximum_order_price)
+        return get_weight_type_display(
+            self.minimum_order_weight, self.maximum_order_weight)
 
 
-class ShippingCountryQueryset(models.QuerySet):
+class ShippingMethodTranslation(models.Model):
+    language_code = models.CharField(max_length=10)
+    name = models.CharField(max_length=255, null=True, blank=True)
+    shipping_method = models.ForeignKey(
+        ShippingMethod, related_name='translations', on_delete=models.CASCADE)
 
-    def unique_for_country_code(self, country_code):
-        shipping = self.filter(
-            Q(country_code=country_code) |
-            Q(country_code=ANY_COUNTRY))
-        shipping = shipping.order_by('shipping_method_id')
-        shipping = shipping.values_list(
-            'shipping_method_id', 'id', 'country_code')
-        grouped_shipping = groupby(shipping, itemgetter(0))
-        any_country = ANY_COUNTRY
-
-        ids = []
-
-        for shipping_method_id, method_values in grouped_shipping:
-            method_values = list(method_values)
-            # if there is any country choice and specific one remove any
-            # country choice
-            if len(method_values) == 2:
-                method = [val for val in method_values
-                          if val[2] != any_country][0]
-            else:
-                method = method_values[0]
-            ids.append(method[1])
-        return self.filter(id__in=ids)
+    class Meta:
+        unique_together = (('language_code', 'shipping_method'),)

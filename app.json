@@ -46,8 +46,9 @@
   "addons": [
     "heroku-postgresql:hobby-dev",
     "heroku-redis:hobby-dev",
+    "cloudamqp:lemur",
     "sendgrid:starter",
-    "bonsai:sandbox-10"
+    "scheduler:standard"
   ],
   "buildpacks": [
     {

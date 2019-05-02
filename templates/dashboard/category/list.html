@@ -2,122 +2,93 @@
 {% load i18n %}
 {% load mptt_tags %}
 {% load materializecss %}
+{% load static %}
+{% load utils %}
 
-{% block title %}{% trans "Categories" context "Category list page title" %} - {{ block.super }}{% endblock %}
+{% block title %}
+  {% trans "Categories" context "Category list page title" %} - {{ block.super }}
+{% endblock %}
 
 {% block body_class %}body-categories{% endblock %}
 
 {% block menu_categories_class %}active{% endblock %}
 
 {% block header_menu %}
-    {% if root %}
-        {% if root.parent %}
-            {% url 'dashboard:category-list' root_pk=root.parent.pk as url %}
-        {% else %}
-            {% url 'dashboard:category-list' as url %}
-        {% endif %}
-        {% include "dashboard/includes/_back-link.html" with url=url %}
-    {% else %}
-        {{ block.super }}
-    {% endif %}
+  {{ block.super }}
 {% endblock %}
 
 {% block header_extra %}
-    <div class="fixed-action-btn">
-        <a class="btn-fab btn-floating btn-large waves-effect waves-light teal"
-           title="{% trans "Add category" context "Category list add button text" %}"
-           href="
-               {% if root %}{% url 'dashboard:category-add' root_pk=root.pk %}{% else %}{% url 'dashboard:category-add' %}{% endif %}">
-            <i class="material-icons">add</i>
-        </a>
-    </div>
-
-    {% if root %}
-        <a class="dropdown-button" href="#" data-activates="category-delete" data-constrainwidth="false">
-            <i class="material-icons">arrow_drop_down</i>
-        </a>
-        <ul id="category-delete" class="dropdown-content">
-            <li>
-                <a class="modal-trigger-custom" data-href="{% url 'dashboard:category-edit' root_pk=root.pk %}"
-                   href="#base-modal">
-                    {% trans "Edit category" context "Category list action link" %}
-                </a>
-            </li>
-
-            <li>
-                <a class="modal-trigger-custom" data-href="{% url 'dashboard:category-delete' pk=root.pk %}"
-                   href="#base-modal">
-                    {% trans "Remove category" context "Category list action link" %}
-                </a>
-            </li>
-        </ul>
-    {% endif %}
+  <div class="btn-fab-fixed">
+    <a href="{% url 'dashboard:category-add' %}" class="btn-fab-default waves-effect waves-light" title="{% trans 'Add category' context 'Category list add button text' %}">
+      <svg data-src="{% static 'dashboard/images/add.svg' %}"/>
+    </a>
+  </div>
 {% endblock %}
 
 {% block breadcrumbs %}
-    <ul class="breadcrumbs breadcrumbs--history">
-        {% if path %}
-            <li><a href="{% url 'dashboard:category-list' %}">{% trans "Categories" context "Category list breadcrumbs" %}</a></li>
-        {% else %}
-            <li class="visible-s"><span>{% trans "Categories" context "Category list breadcrumbs" %}</span></li>
-        {% endif %}
-        {% if path %}
-            <li class="back-mobile"><a href="{% url 'dashboard:category-list' %}"><i
-                    class="material-icons">arrow_back</i></a></li>
-            {% for node in path %}
-                {% if forloop.last %}
-                    <li title="{{ node.name }}">
-                        <span class="breadcrumbs--ellipsed-item">{{ node.name }}</span>
-                    </li>
-                {% else %}
-                    <li class="hide-on-med-and-down">
-                        <a title="{{ node.name }}" href="{% url 'dashboard:category-list' root_pk=node.pk %}"
-                           class="breadcrumbs--ellipsed-item">
-                            {{ node.name }}
-                        </a>
-                    </li>
-                {% endif %}
-            {% endfor %}
-        {% endif %}
-    </ul>
+  <ul class="breadcrumbs breadcrumbs--history">
+    <li class="visible-s">
+      <span>
+        {% trans "Categories" context "Dashboard categories list" %}
+      </span>
+    </li>
+  </ul>
 {% endblock %}
 
 {% block menu_catalogue_class %} active{% endblock %}
 
 {% block content %}
-    <div class="row">
-        <div class="col s12">
-            <ul class="collection list">
-                {% if categories %}
-                    {% for node in categories %}
-                        <li class="collection-item list-item list-item--two-lines">
-                            <a class="list-item-name" href="{% url "dashboard:category-list" root_pk=node.pk %}">
-                                {{ node.name }}
-                            </a>
+  <div class="row">
+    <div class="col s12 l9">
+      {% if categories %}
+        <div class="card">
+          <div class="data-table-container">
+            <table class="bordered highlight responsive data-table data-table-description">
+              <thead>
+                <tr>
+                  {% trans "Name" context "Category list table header name" as label %}
+                  {% sorting_header 'name' label %}
 
-                            <p class="list-item-desc"><span>
-                                {% if node.description %}
-                                    {{ node.description }}
-                                {% else %}
-                                    &nbsp;
-                                {% endif %}
-                            </span></p>
-
-                            {% if node.hidden %}
-                                <span class="list-item-icon"><i class="material-icons">visibility_off</i></span>
-                            {% endif %}
-                        </li>
-                    {% endfor %}
-                {% else %}
-                    <p>
-                        {% if root %}
-                            {% trans "No subcategories." context "Empty Category list message" %}
-                        {% else %}
-                            {% trans "No categories." context "Empty Category list message" %}
-                        {% endif %}
-                    </p>
-                {% endif %}
-            </ul>
+                  {% trans "Description" context "Category list table header description" as label %}
+                  {% sorting_header 'description' label is_wide=True %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for node in categories %}
+                  <tr data-action-go="{% url 'dashboard:category-details' pk=node.pk %}">
+                    <td>
+                      {{ node.name }}
+                    </td>
+                    <td class="nowrap">
+                      {% if node.description %}
+                        {{ node.description|truncatewords:10 }}
+                      {% else %}
+                        &nbsp;
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
         </div>
+        {% paginate categories %}
+      {% else %}
+        {% if is_empty %}
+          {% include 'dashboard/category/zero_page.html' %}
+        {% else %}
+          <div class="col s12">
+            <div class="not-found">
+              <p class="grey-text">
+                {% trans "No categories found." context "Empty category list message" %}
+              </p>
+            </div>
+          </div>
+        {% endif %}
+      {% endif %}
     </div>
+    <div class="col s12 l3" id="filters">
+      {% if not is_empty %}{% filters filter_set %}{% endif %}
+    </div>
+  </div>
 {% endblock %}
