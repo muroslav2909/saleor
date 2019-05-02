@@ -31,7 +31,7 @@ def add_voucher_form(view):
                 return redirect(next_url)
             else:
                 remove_voucher_from_checkout(checkout)
-                # if only discount form was used we clear post for other forms
+                # if  only discount form was used we clear post for other forms
                 request.POST = {}
         else:
             taxes = get_taxes_for_checkout(checkout, request.taxes)
